@@ -288,6 +288,143 @@ function Group({
   );
 }
 
+// Sub-minute gaps are timer-switch noise (stop one task, start the next a
+// few seconds later), not a rest worth naming — fold them into whichever
+// entry is next to them instead of showing a "Rest: 0m" row.
+const MIN_REST_MS = 60_000;
+
+type TimelineBlock =
+  | { kind: "entry"; start: number; end: number; title: string; color: string }
+  | { kind: "rest"; start: number; end: number };
+
+// Today's tracked spans in chronological order, with the gaps between them —
+// and the stretch since the last one, up to now — turned into explicit rest
+// blocks. This is what answers "when did I track task X" and "how long have
+// I actually been resting" without hovering anything.
+function buildTimeline(entries: ReportEntry[], dayStart: number, now: number): TimelineBlock[] {
+  const spans = entries
+    .map((e) => {
+      const start = Math.max(parseUTC(e.started_at).getTime(), dayStart);
+      const end = Math.min(parseUTC(e.ended_at).getTime(), now);
+      return end > start ? { start, end, title: e.title, color: COLOR[kindOf(e)] } : null;
+    })
+    .filter((s): s is NonNullable<typeof s> => s !== null)
+    .sort((a, b) => a.start - b.start);
+  if (spans.length === 0) return [];
+
+  const blocks: TimelineBlock[] = [];
+  let cursor = spans[0].start;
+  for (const s of spans) {
+    if (s.start - cursor >= MIN_REST_MS) blocks.push({ kind: "rest", start: cursor, end: s.start });
+    blocks.push({ kind: "entry", start: s.start, end: s.end, title: s.title, color: s.color });
+    cursor = Math.max(cursor, s.end);
+  }
+  if (now - cursor >= MIN_REST_MS) blocks.push({ kind: "rest", start: cursor, end: now });
+  return blocks;
+}
+
+const fmtTime = (t: number) =>
+  new Date(t).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+
+// The chronological view of today: a bar (gaps read as rest at a glance) plus
+// an exact list underneath, since two same-kind entries look identical on the
+// bar and hover doesn't work well on touch.
+function Timeline({ blocks }: { blocks: TimelineBlock[] }) {
+  const hourMs = 3_600_000;
+  const boundStart = Math.floor(blocks[0].start / hourMs) * hourMs;
+  const boundEnd = Math.ceil(blocks[blocks.length - 1].end / hourMs) * hourMs;
+  const span = Math.max(boundEnd - boundStart, hourMs);
+  const pct = (t: number) => ((t - boundStart) / span) * 100;
+
+  const totalHours = span / hourMs;
+  const tickEvery = totalHours <= 6 ? 1 : totalHours <= 12 ? 2 : totalHours <= 24 ? 3 : 4;
+  const ticks: number[] = [];
+  for (let t = boundStart; t < boundEnd; t += tickEvery * hourMs) ticks.push(t);
+  ticks.push(boundEnd);
+
+  const rest = blocks
+    .filter((b) => b.kind === "rest")
+    .reduce((s, b) => s + (b.end - b.start) / 1000, 0);
+
+  return (
+    <div>
+      <div className="mb-1.5 flex items-baseline justify-between text-xs text-slate-500 dark:text-slate-400">
+        <span className="font-medium">Timeline</span>
+        {rest > 0 && <span>Rest: {formatDuration(rest)}</span>}
+      </div>
+
+      <div className="relative h-7 overflow-hidden rounded-lg bg-slate-100 dark:bg-slate-800">
+        {blocks
+          .filter((b): b is Extract<TimelineBlock, { kind: "entry" }> => b.kind === "entry")
+          .map((b, i) => (
+            <div
+              key={i}
+              title={`${b.title} · ${fmtTime(b.start)}–${fmtTime(b.end)} · ${formatDuration((b.end - b.start) / 1000)}`}
+              className="absolute top-0 h-full"
+              style={{
+                left: `${pct(b.start)}%`,
+                width: `${Math.max(pct(b.end) - pct(b.start), 0.4)}%`,
+                background: b.color,
+              }}
+            />
+          ))}
+      </div>
+
+      <div className="relative mt-1 h-4 text-[10px] text-slate-400">
+        {ticks.map((t) => {
+          const p = pct(t);
+          const edge = p < 4 ? "start" : p > 96 ? "end" : "mid";
+          return (
+            <span
+              key={t}
+              className={
+                edge === "start"
+                  ? "absolute left-0"
+                  : edge === "end"
+                    ? "absolute right-0"
+                    : "absolute -translate-x-1/2"
+              }
+              style={edge === "mid" ? { left: `${p}%` } : undefined}
+            >
+              {fmtTime(t)}
+            </span>
+          );
+        })}
+      </div>
+
+      <ul className="mt-3 space-y-1 font-mono text-xs tabular-nums">
+        {blocks.map((b, i) => (
+          <li key={i} className="flex items-center gap-2">
+            <span
+              className={
+                b.kind === "entry"
+                  ? "inline-block h-2 w-2 shrink-0 rounded-full"
+                  : "inline-block h-2 w-2 shrink-0 rounded-full border border-slate-300 dark:border-slate-600"
+              }
+              style={b.kind === "entry" ? { background: b.color } : undefined}
+            />
+            <span className="shrink-0 whitespace-nowrap text-slate-500 dark:text-slate-400">
+              {fmtTime(b.start)}–{fmtTime(b.end)}
+            </span>
+            <span
+              className={`min-w-0 flex-1 truncate ${
+                b.kind === "rest"
+                  ? "text-slate-400 italic dark:text-slate-500"
+                  : "text-slate-700 dark:text-slate-200"
+              }`}
+            >
+              {b.kind === "entry" ? b.title : "Rest"}
+            </span>
+            <span className="shrink-0 text-slate-400">
+              {formatDuration((b.end - b.start) / 1000)}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 function ChartTooltip({ active, payload, label }: any) {
   if (!active || !payload?.length) return null;
   const heading = payload[0]?.payload?.full ?? label;
@@ -348,6 +485,10 @@ export default function ReportsView() {
 
   const today = useMemo(
     () => splitByTask(entries, startOfToday().getTime(), Date.now()),
+    [entries],
+  );
+  const timelineBlocks = useMemo(
+    () => buildTimeline(entries, startOfToday().getTime(), Date.now()),
     [entries],
   );
   const period = useMemo(() => splitByTask(entries), [entries]);
@@ -442,6 +583,12 @@ export default function ReportsView() {
         <div className="mt-3">
           <SplitMeter recurring={today.recurring} once={today.once} />
         </div>
+
+        {timelineBlocks.length > 0 && (
+          <div className="mt-4 border-t border-slate-100 pt-4 dark:border-slate-800">
+            <Timeline blocks={timelineBlocks} />
+          </div>
+        )}
 
         <div className="mt-4">
           {today.rows.length ? (
