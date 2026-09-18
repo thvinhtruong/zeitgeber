@@ -21,6 +21,9 @@ const RECURRENCES = ["none", "daily", "weekly"];
 const isDayKey = (v: unknown): v is string =>
   typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v);
 
+const listProjects = db.query(`SELECT * FROM projects ORDER BY name`);
+const getProject = db.query(`SELECT id FROM projects WHERE id = ?`);
+
 // ---------- queries ----------
 const SECONDS = "(julianday(e.ended_at) - julianday(e.started_at)) * 86400";
 
@@ -88,11 +91,17 @@ function handleApi(req: Request, url: URL): Response {
         ? Math.max(0, Math.round(body.duration_minutes))
         : 90;
       const planned_for = isDayKey(body?.planned_for) ? body.planned_for : null;
+      let project_id: number | null = null;
+      if (body?.project_id != null) {
+        const pid = Number(body.project_id);
+        if (!Number.isInteger(pid) || !getProject.get(pid)) return bad("project not found");
+        project_id = pid;
+      }
       const now = nowSQL();
       const row = db
         .query(
-          `INSERT INTO tasks (title, description, status, recurrence, duration_minutes, planned_for, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+          `INSERT INTO tasks (title, description, status, recurrence, duration_minutes, planned_for, project_id, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
         )
         .get(
           title,
@@ -101,6 +110,7 @@ function handleApi(req: Request, url: URL): Response {
           recurrence,
           duration,
           planned_for,
+          project_id,
           now,
           now,
         );
@@ -146,6 +156,16 @@ function handleApi(req: Request, url: URL): Response {
         if (body.planned_for === null || isDayKey(body.planned_for)) {
           fields.push("planned_for = ?");
           vals.push(body.planned_for);
+        }
+        // project_id: null clears it, a number must reference an existing project
+        if (body.project_id === null) {
+          fields.push("project_id = ?");
+          vals.push(null);
+        } else if (body.project_id !== undefined) {
+          const pid = Number(body.project_id);
+          if (!Number.isInteger(pid) || !getProject.get(pid)) return bad("project not found");
+          fields.push("project_id = ?");
+          vals.push(pid);
         }
         if (typeof body.archived === "boolean") {
           fields.push("archived = ?");
@@ -204,6 +224,59 @@ function handleApi(req: Request, url: URL): Response {
       });
       tx();
       return json({ ok: true, task_id: id, started_at: now });
+    }
+  }
+
+  // GET /api/projects
+  if (pathname === "/api/projects" && method === "GET") {
+    return json({ projects: listProjects.all() });
+  }
+
+  // POST /api/projects
+  if (pathname === "/api/projects" && method === "POST") {
+    return req.json().then((body: any) => {
+      const name = String(body?.name ?? "").trim();
+      if (!name) return bad("name is required");
+      const color = typeof body?.color === "string" && body.color.trim() ? body.color.trim() : "#6366f1";
+      const row = db
+        .query(`INSERT INTO projects (name, color, created_at) VALUES (?, ?, ?) RETURNING *`)
+        .get(name, color, nowSQL());
+      return json(row, 201);
+    }) as unknown as Response;
+  }
+
+  // /api/projects/:id
+  if (seg[0] === "api" && seg[1] === "projects" && seg[2] && !seg[3]) {
+    const pid = Number(seg[2]);
+    if (!Number.isInteger(pid)) return bad("invalid id");
+    if (!getProject.get(pid)) return bad("project not found", 404);
+
+    // PATCH /api/projects/:id
+    if (method === "PATCH") {
+      return req.json().then((body: any) => {
+        const fields: string[] = [];
+        const vals: any[] = [];
+        if (typeof body.name === "string") {
+          const name = body.name.trim();
+          if (!name) return bad("name cannot be empty");
+          fields.push("name = ?");
+          vals.push(name);
+        }
+        if (typeof body.color === "string" && body.color.trim()) {
+          fields.push("color = ?");
+          vals.push(body.color.trim());
+        }
+        if (!fields.length) return bad("nothing to update");
+        vals.push(pid);
+        const row = db.query(`UPDATE projects SET ${fields.join(", ")} WHERE id = ? RETURNING *`).get(...vals);
+        return json(row);
+      }) as unknown as Response;
+    }
+
+    // DELETE /api/projects/:id  (tasks keep existing via ON DELETE SET NULL)
+    if (method === "DELETE") {
+      db.query(`DELETE FROM projects WHERE id = ?`).run(pid);
+      return json({ ok: true });
     }
   }
 

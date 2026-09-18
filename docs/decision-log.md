@@ -10,6 +10,22 @@
 
 Skip entries for bug fixes, doc-only changes, style tweaks, and dependency bumps. (This LITE setup has no separate ADR files; if rationale grows long, link out from the bullet.)
 
+## 2026-09-19 — Locked-in mode (focus mode → full-screen takeover)
+
+- **Decision** — Renamed focus mode to **locked-in mode** (`useFocusMode.ts` → `useLockedIn.ts`, `ad-focus` → `ad-locked-in`) and gave it a full-screen takeover: while on, `AppBody` renders `LockedInView` in place of the entire tab shell (no header, no nav) instead of just a header chip. It shows a live clock + Stop while tracking, or a minimal task picker when not — "not tracking" is a real state now, not just a gap before a reminder. Exit is a single always-visible corner button with **no confirmation**, same instant stop-and-return as before. The reminder engine (5-min cadence, OS notification, `document.title`) is unchanged.
+- **Why** — The old design was a nag (a chip you glance past); the goal was a shield that removes the temptation surface of task-hopping through the app's own UI, which a louder notification can't do. Turning locked-in on with nothing running needed its own screen rather than stranding the user with only an "Exit" button. Exit friction (a confirm dialog) was considered and explicitly rejected — this is a single-user local tool with no real enforcement (a reload bypasses anything), so added friction would only punish legitimate quick exits without stopping anyone determined to bail, and it breaks the existing "off = I'm done" one-action design.
+- **Implications** — The two flag hooks (`useLockedIn`, `useIdleAutoStop`) had to move out of `TrackingStatus` (which the takeover view now replaces) and up into a new `AppBody.tsx`, one level above the shell swap — `App.tsx` is now just `TrackingProvider` + `AppBody`. `TrackingStatus` is purely presentational (props, not its own hooks) as a result. Any future third session flag must mount in `AppBody`, not in whichever component renders the chips — mounting it lower risks it going dark whenever the shell swaps. `LockedInView`'s picker reuses `TrackingProvider`'s `{ tasks, active }` rather than fetching its own copy.
+
+---
+
+## 2026-09-19 — Projects (optional task grouping)
+
+- **Decision** — Added a `projects` table (`name`, `color`) and a nullable `tasks.project_id`. `TasksView` gets a Project column (a colored `<select>` chip) and an inline "Manage projects" panel (create/rename/delete, preset color swatches) — no separate settings page. `TodayView`, filtering/grouping, and per-project reporting are explicitly out of scope for this pass.
+- **Why** — Users wanted to group related tasks without disturbing the existing "no project is fine" ergonomics — the same posture `planned_for` already has (nullable, no CHECK, unremarkable default). Keeping it to a label-only MVP (no filter, no report split) avoided speculating on how grouping should surface in the two views that already have tight, deliberately-curated row layouts (`TodayView`'s planned/tracked columns, `ReportsView`'s recurring/one-off split).
+- **Implications** — `GET /api/tasks` intentionally does **not** join project name/color server-side; the client fetches `GET /api/projects` separately and joins in `TasksView`, keeping the hot task-list query unchanged. Deleting a project sets `project_id = NULL` on its tasks (`ON DELETE SET NULL`) rather than cascading — tasks must never disappear because their project did. Any future filter/group-by or per-project report work should read this entry first rather than re-deriving the "why no join" call.
+
+---
+
 ## 2026-08-21 — Renamed to Zeitgeber; flags in the open; reports split by kind of task
 
 - **Decision** — Renamed the app **Activity Detector → Zeitgeber** (UI, tab title, README, package names; infra names deliberately unchanged). Moved focus mode and auto-stop out of the `TrackingStatus` popover into always-visible header chips and **deleted the header status badge/popover entirely**, and rebuilt `ReportsView` as a fixed **Today** breakdown — the only thing it shows by default — plus an on-demand range (week → year) whose trend chart and per-task totals are split into recurring vs one-off, drawn as horizontal rows rather than a column table. `/api/report` now also returns each entry's `recurrence`.

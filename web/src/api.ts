@@ -9,10 +9,18 @@ export interface Task {
   recurrence: Recurrence;
   duration_minutes: number;
   planned_for: string | null; // local day key "YYYY-MM-DD"; null = backlog
+  project_id: number | null;
   archived: number;
   created_at: string;
   updated_at: string;
   total_seconds: number;
+}
+
+export interface Project {
+  id: number;
+  name: string;
+  color: string;
+  created_at: string;
 }
 
 export interface Active {
@@ -59,7 +67,13 @@ export const api = {
     patch: Partial<
       Pick<
         Task,
-        "title" | "description" | "status" | "recurrence" | "duration_minutes" | "planned_for"
+        | "title"
+        | "description"
+        | "status"
+        | "recurrence"
+        | "duration_minutes"
+        | "planned_for"
+        | "project_id"
       >
     > & {
       archived?: boolean;
@@ -67,6 +81,15 @@ export const api = {
   ) =>
     req<Task>(`/api/tasks/${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
   remove: (id: number) => req(`/api/tasks/${id}`, { method: "DELETE" }),
+  projects: () => req<{ projects: Project[] }>("/api/projects"),
+  createProject: (name: string, color?: string) =>
+    req<Project>("/api/projects", {
+      method: "POST",
+      body: JSON.stringify(color ? { name, color } : { name }),
+    }),
+  updateProject: (id: number, patch: Partial<Pick<Project, "name" | "color">>) =>
+    req<Project>(`/api/projects/${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
+  removeProject: (id: number) => req(`/api/projects/${id}`, { method: "DELETE" }),
   start: (id: number) => req(`/api/tasks/${id}/start`, { method: "POST" }),
   stop: (at?: string) =>
     req("/api/stop", { method: "POST", body: JSON.stringify(at ? { at } : {}) }),

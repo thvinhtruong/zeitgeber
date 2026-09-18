@@ -1,18 +1,23 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Active } from "./api";
 
-// Focus mode — a manual "I'm working right now" switch, and the companion to
-// useIdleAutoStop:
+// Locked-in mode — a manual "I'm working right now" switch, and the companion
+// to useIdleAutoStop:
 //
 //   auto-stop  →  you went idle 15 min, so the timer stops on its own
-//   focus mode →  a timer isn't running, so you get reminded every 5 min
+//   locked in  →  a timer isn't running, so you get reminded every 5 min, and
+//                 the whole UI swaps to a single-task takeover view
 //
-// Presence is declared, not detected: while focus mode is on you are saying you
+// Presence is declared, not detected: while locked in you are saying you
 // intend to be tracking, so any untracked stretch is worth a nudge. Finishing
-// work means switching focus mode off, which also stops whatever is running —
-// so the "stop nagging me" action and the "I'm done" action are the same one.
+// work means switching locked-in mode off, which also stops whatever is
+// running — so the "stop nagging me" action and the "I'm done" action are the
+// same one, and there is deliberately no exit confirmation.
+//
+// (This hook used to be called useFocusMode / key "ad-focus" — the reminder
+// engine below is unchanged, only its presentation grew a takeover view.)
 
-const KEY = "ad-focus";
+const KEY = "ad-locked-in";
 const BASE_TITLE = "Zeitgeber";
 const NUDGE_EVERY_MS = 5 * 60_000;
 const TICK_MS = 15_000;
@@ -23,7 +28,7 @@ type Options = {
   onStopTimer: () => Promise<unknown> | unknown; // switching off ends the session
 };
 
-export function useFocusMode({ active, runningLabel, onStopTimer }: Options) {
+export function useLockedIn({ active, runningLabel, onStopTimer }: Options) {
   const [on, setOn] = useState(() => localStorage.getItem(KEY) === "1");
   const [notice, setNotice] = useState<string | null>(null);
   const [untrackedMs, setUntrackedMs] = useState(0);
@@ -39,6 +44,7 @@ export function useFocusMode({ active, runningLabel, onStopTimer }: Options) {
   labelRef.current = runningLabel;
 
   const tickRef = useRef<() => void>(() => {});
+  const audioCtxRef = useRef<AudioContext | null>(null);
 
   useEffect(() => {
     const setTitle = (t: string) => {
@@ -73,6 +79,7 @@ export function useFocusMode({ active, runningLabel, onStopTimer }: Options) {
       if (elapsed >= (nudgesRef.current + 1) * NUDGE_EVERY_MS) {
         nudgesRef.current += 1;
         notify(Math.round(elapsed / 60_000));
+        chime(audioCtxRef.current);
       }
 
       setTitle(nudgesRef.current > 0 ? `⏸ Not tracking · ${BASE_TITLE}` : BASE_TITLE);
@@ -110,6 +117,15 @@ export function useFocusMode({ active, runningLabel, onStopTimer }: Options) {
       setOn(true);
       localStorage.setItem(KEY, "1");
 
+      // Created/resumed on the click, not lazily inside the reminder tick —
+      // browsers only allow audio to start from a user gesture, and this
+      // toggle is the only gesture in the whole locked-in lifecycle.
+      const Ctor = window.AudioContext ?? (window as any).webkitAudioContext;
+      if (Ctor) {
+        if (!audioCtxRef.current) audioCtxRef.current = new Ctor();
+        if (audioCtxRef.current.state === "suspended") void audioCtxRef.current.resume();
+      }
+
       // Permission is requested here, on the click — never on mount. It is
       // deliberately not awaited: an ignored prompt would otherwise leave the
       // switch looking dead, and the tab title works without it either way.
@@ -142,12 +158,37 @@ export function useFocusMode({ active, runningLabel, onStopTimer }: Options) {
   };
 }
 
+// Two short beeps — audible over the OS notification's own (silent) chime,
+// and independent of notification permission so it still fires when that's
+// denied. `ctx` is created/resumed on the toggle-on click (autoplay policy).
+function chime(ctx: AudioContext | null) {
+  if (!ctx) return;
+  try {
+    [0, 0.18].forEach((offset) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = "sine";
+      osc.frequency.value = 880;
+      const t = ctx.currentTime + offset;
+      gain.gain.setValueAtTime(0.0001, t);
+      gain.gain.exponentialRampToValueAtTime(0.25, t + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.15);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start(t);
+      osc.stop(t + 0.16);
+    });
+  } catch {
+    // some platforms throw on a stale/closed context — the notification and
+    // tab title still carry the reminder
+  }
+}
+
 function notify(minutes: number) {
   if (!("Notification" in window) || Notification.permission !== "granted") return;
   try {
     const n = new Notification("Not tracking any task", {
-      body: `Focus mode is on and you've been off the clock for ${minutes} min.`,
-      tag: "ad-focus", // replaces the previous reminder instead of stacking
+      body: `Locked-in mode is on and you've been off the clock for ${minutes} min.`,
+      tag: "ad-locked-in", // replaces the previous reminder instead of stacking
       silent: true,
     });
     n.onclick = () => {

@@ -5,6 +5,7 @@ import {
   parseUTC,
   toLocalInput,
   type Active,
+  type Project,
   type Recurrence,
   type Status,
   type Task,
@@ -35,6 +36,7 @@ const statusStyles: Record<Status, string> = {
 export default function TasksView() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [active, setActive] = useState<Active | null>(null);
+  const [projects, setProjects] = useState<Project[]>([]);
   const [newTitle, setNewTitle] = useState("");
   const [now, setNow] = useState(Date.now());
   const [error, setError] = useState<string | null>(null);
@@ -45,8 +47,21 @@ export default function TasksView() {
       cur?.id === id && cur.panel === panel ? null : { id, panel },
     );
   const [showDone, setShowDone] = useState(false);
+  const [managingProjects, setManagingProjects] = useState(false);
   // see TodayView: `publish` feeds the header pill, `version` asks us to re-read
   const { publish, version } = useTracking();
+
+  async function refreshProjects() {
+    try {
+      const { projects } = await api.projects();
+      setProjects(projects);
+    } catch (e: any) {
+      setError(e.message);
+    }
+  }
+  useEffect(() => {
+    refreshProjects();
+  }, []);
 
   // 1s tick drives the live timer display
   useEffect(() => {
@@ -109,6 +124,12 @@ export default function TasksView() {
       </form>
 
       <div className="flex flex-wrap items-center gap-2 text-sm">
+        <button
+          onClick={() => setManagingProjects((v) => !v)}
+          className="rounded-md px-2 py-1 text-xs font-medium text-slate-500 hover:bg-slate-100 hover:text-slate-800 dark:hover:bg-slate-800 dark:hover:text-slate-200"
+        >
+          {managingProjects ? "Hide projects" : "Manage projects"}
+        </button>
         {doneCount > 0 && (
           <button
             onClick={() => setShowDone((v) => !v)}
@@ -118,6 +139,14 @@ export default function TasksView() {
           </button>
         )}
       </div>
+
+      {managingProjects && (
+        <ProjectManager
+          projects={projects}
+          onChanged={refreshProjects}
+          onError={setError}
+        />
+      )}
 
       {error && (
         <div className="rounded-lg bg-red-100 px-3 py-2 text-sm text-red-700 dark:bg-red-900/40 dark:text-red-300">
@@ -131,6 +160,7 @@ export default function TasksView() {
             <tr>
               <th className="px-4 py-2.5 font-medium">Task</th>
               <th className="px-4 py-2.5 font-medium">Status</th>
+              <th className="px-4 py-2.5 font-medium">Project</th>
               <th className="px-4 py-2.5 font-medium">Plan</th>
               <th className="px-4 py-2.5 text-right font-medium">Duration</th>
               <th className="px-4 py-2.5 text-right font-medium">Time</th>
@@ -201,6 +231,13 @@ export default function TasksView() {
                     </div>
                   </td>
                   <td className="px-4 py-2.5">
+                    <ProjectCell
+                      task={t}
+                      projects={projects}
+                      onChange={(project_id) => act(() => api.update(t.id, { project_id }))()}
+                    />
+                  </td>
+                  <td className="px-4 py-2.5">
                     <PlanCell task={t} onChange={(day) => act(() => api.update(t.id, { planned_for: day }))()} />
                   </td>
                   <td className="px-4 py-2.5 text-right">
@@ -250,7 +287,7 @@ export default function TasksView() {
                 </tr>
                 {expanded?.id === t.id && (
                   <tr>
-                    <td colSpan={7} className="bg-slate-50/70 px-4 py-3 dark:bg-slate-800/30">
+                    <td colSpan={8} className="bg-slate-50/70 px-4 py-3 dark:bg-slate-800/30">
                       <div className="mb-2 flex gap-1">
                         {(["notes", "entries"] as Panel[]).map((p) => (
                           <button
@@ -283,7 +320,7 @@ export default function TasksView() {
             })}
             {visibleTasks.length === 0 && (
               <tr>
-                <td colSpan={7} className="px-4 py-10 text-center text-slate-400">
+                <td colSpan={8} className="px-4 py-10 text-center text-slate-400">
                   {tasks.length === 0
                     ? "No tasks yet — add one above."
                     : "All tasks completed — use “Show completed” to see them."}
@@ -387,6 +424,153 @@ function PlanCell({
         ✕
       </button>
     </span>
+  );
+}
+
+// A task's project, if any — not having one is the default and stays fine
+// (mirrors PlanCell: unset state renders differently from set state).
+function ProjectCell({
+  task,
+  projects,
+  onChange,
+}: {
+  task: Task;
+  projects: Project[];
+  onChange: (id: number | null) => void;
+}) {
+  const current = projects.find((p) => p.id === task.project_id) ?? null;
+
+  return (
+    <select
+      value={task.project_id ?? ""}
+      onChange={(e) => onChange(e.target.value ? Number(e.target.value) : null)}
+      className={`cursor-pointer rounded-md border-0 px-2 py-1 text-xs font-medium ${
+        current ? "" : "bg-slate-100 text-slate-400 dark:bg-slate-800 dark:text-slate-500"
+      }`}
+      style={current ? { backgroundColor: `${current.color}20`, color: current.color } : undefined}
+    >
+      <option value="">No project</option>
+      {projects.map((p) => (
+        <option key={p.id} value={p.id}>
+          {p.name}
+        </option>
+      ))}
+    </select>
+  );
+}
+
+const PROJECT_COLORS = [
+  "#6366f1", // indigo
+  "#10b981", // emerald
+  "#f59e0b", // amber
+  "#f43f5e", // rose
+  "#0ea5e9", // sky
+  "#8b5cf6", // violet
+  "#14b8a6", // teal
+  "#f97316", // orange
+];
+
+// Inline project CRUD — deliberately no separate settings page for v1.
+function ProjectManager({
+  projects,
+  onChanged,
+  onError,
+}: {
+  projects: Project[];
+  onChanged: () => void;
+  onError: (msg: string) => void;
+}) {
+  const [name, setName] = useState("");
+  const [color, setColor] = useState(PROJECT_COLORS[0]);
+
+  async function create(e: React.FormEvent) {
+    e.preventDefault();
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    try {
+      setName("");
+      await api.createProject(trimmed, color);
+      onChanged();
+    } catch (e: any) {
+      onError(e.message);
+    }
+  }
+
+  const rename = async (p: Project, newName: string) => {
+    const trimmed = newName.trim();
+    if (!trimmed || trimmed === p.name) return;
+    try {
+      await api.updateProject(p.id, { name: trimmed });
+      onChanged();
+    } catch (e: any) {
+      onError(e.message);
+    }
+  };
+
+  const remove = async (p: Project) => {
+    try {
+      await api.removeProject(p.id);
+      onChanged();
+    } catch (e: any) {
+      onError(e.message);
+    }
+  };
+
+  return (
+    <div className="space-y-2 rounded-xl border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-slate-900">
+      <form onSubmit={create} className="flex flex-wrap items-center gap-2">
+        <span className="flex items-center gap-1">
+          {PROJECT_COLORS.map((c) => (
+            <button
+              key={c}
+              type="button"
+              onClick={() => setColor(c)}
+              title={c}
+              className={`h-5 w-5 rounded-full ${color === c ? "ring-2 ring-offset-1 ring-slate-400 dark:ring-offset-slate-900" : ""}`}
+              style={{ backgroundColor: c }}
+            />
+          ))}
+        </span>
+        <input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="New project name…"
+          className="min-w-[10rem] flex-1 rounded-md border border-slate-300 bg-white px-2 py-1 text-sm outline-none focus:border-indigo-500 dark:border-slate-700 dark:bg-slate-950"
+        />
+        <button className="rounded-md bg-indigo-600 px-3 py-1 text-xs font-medium text-white hover:bg-indigo-500">
+          Add project
+        </button>
+      </form>
+
+      {projects.length > 0 && (
+        <ul className="flex flex-wrap gap-1.5">
+          {projects.map((p) => (
+            <li
+              key={p.id}
+              className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium"
+              style={{ backgroundColor: `${p.color}20`, color: p.color }}
+            >
+              <input
+                defaultValue={p.name}
+                onBlur={(e) => rename(p, e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                }}
+                className="w-auto min-w-[3rem] border-0 bg-transparent p-0 outline-none"
+                style={{ color: p.color, width: `${Math.max(p.name.length, 3)}ch` }}
+              />
+              <button
+                onClick={() => remove(p)}
+                title="Delete project (tasks keep, unassigned)"
+                className="opacity-60 hover:opacity-100"
+              >
+                ✕
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   );
 }
 

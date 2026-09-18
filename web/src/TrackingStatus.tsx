@@ -1,23 +1,18 @@
-import { useCallback, useMemo, useState } from "react";
-import { api } from "./api";
 import { formatDuration } from "./format";
-import { useTracking } from "./tracking";
-import { useFocusMode } from "./useFocusMode";
-import { useIdleAutoStop } from "./useIdleAutoStop";
+import type { useIdleAutoStop } from "./useIdleAutoStop";
+import type { useLockedIn } from "./useLockedIn";
 
-// The header home of the two session flags — focus mode (nag me while I'm not
-// tracking) and auto-stop (drop the timer when I walk away) — as a matched pair
-// of always-visible chips. They're flipped many times a day, so they sit in the
-// open rather than behind a disclosure.
+// The header home of the two session flags — locked-in mode (nag me while I'm
+// not tracking, and take over the screen once a timer's running) and auto-stop
+// (drop the timer when I walk away) — as a matched pair of always-visible
+// chips. They're flipped many times a day, so they sit in the open rather than
+// behind a disclosure.
 //
-// This component also *mounts* both hooks, which is why it exists on every tab:
-// the reminder clock, the tab title, and the idle watcher all run from here,
-// not from whichever view happens to be on screen. There is deliberately no
-// status badge — the running task, its live clock and its stop button belong to
-// the task rows in TodayView, and a second copy in the header only competed
-// with them. What can't live in a row stays here: `document.title` shows the
-// running task on every tab, and a flag's `notice` (permission denied, or an
-// auto-stop that already happened) rides its chip as an amber ring + tooltip.
+// Both flags' hooks are mounted one level up, in AppBody — not here — because
+// entering locked-in mode replaces this component (and the whole header) with
+// LockedInView, and the reminder clock / idle watcher must keep running
+// regardless of which shell is on screen. This component is purely
+// presentational: two chips plus the sr-only nudge announcement.
 
 function FlagChip({
   label,
@@ -62,39 +57,23 @@ function FlagChip({
   );
 }
 
-export default function TrackingStatus() {
-  const { tasks, active, invalidate } = useTracking();
-  const [error, setError] = useState<string | null>(null);
-
-  const runningTask = useMemo(
-    () => (active ? (tasks.find((t) => t.id === active.task_id) ?? null) : null),
-    [tasks, active],
-  );
-
-  const stopTimer = useCallback(async () => {
-    try {
-      await api.stop();
-      invalidate();
-    } catch (e: any) {
-      setError(e.message);
-    }
-  }, [invalidate]);
-
-  const focus = useFocusMode({
-    active,
-    runningLabel: runningTask?.title,
-    onStopTimer: stopTimer,
-  });
-  const idle = useIdleAutoStop({ active, onStopped: invalidate, onError: setError });
-
+export default function TrackingStatus({
+  lockedIn,
+  idle,
+  error,
+}: {
+  lockedIn: ReturnType<typeof useLockedIn>;
+  idle: ReturnType<typeof useIdleAutoStop>;
+  error?: string | null;
+}) {
   return (
     <>
       <FlagChip
-        label="Focus"
-        title="Focus mode — reminds you every 5 min while no timer is running. Switching it off stops the running timer."
-        checked={focus.on}
-        onChange={focus.toggle}
-        notice={focus.notice ?? error}
+        label="Locked in"
+        title="Locked-in mode — takes over the screen with the running task and reminds you every 5 min while no timer is running. Switching it off stops the running timer."
+        checked={lockedIn.on}
+        onChange={lockedIn.toggle}
+        notice={lockedIn.notice ?? error}
       />
       <FlagChip
         label="Auto-idle"
@@ -106,7 +85,7 @@ export default function TrackingStatus() {
 
       {/* the reminder has no visual home now, so keep announcing it */}
       <span role="status" aria-live="polite" className="sr-only">
-        {focus.nudging ? `Not tracking for ${formatDuration(focus.untrackedMs / 1000)}` : ""}
+        {lockedIn.nudging ? `Not tracking for ${formatDuration(lockedIn.untrackedMs / 1000)}` : ""}
       </span>
     </>
   );

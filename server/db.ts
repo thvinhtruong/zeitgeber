@@ -9,11 +9,24 @@ export const db = new Database(`${DATA_DIR}/app.db`, { create: true });
 db.exec("PRAGMA journal_mode = WAL;");
 db.exec("PRAGMA foreign_keys = ON;");
 
+// A project groups tasks; a task without one is unaffected (project_id is
+// nullable, no CHECK). Deleting a project un-links its tasks rather than
+// deleting them — see the ON DELETE SET NULL below.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS projects (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    name       TEXT    NOT NULL,
+    color      TEXT    NOT NULL DEFAULT '#6366f1',
+    created_at TEXT    NOT NULL
+  );
+`);
+
 // The tasks schema. `status` includes 'recurring' (a task done on a daily/weekly
 // cadence); `recurrence` is only meaningful when status = 'recurring'.
 // `duration_minutes` is a planned/estimate duration (default 1h30m).
 // `planned_for` is the LOCAL calendar day the task is planned for ("YYYY-MM-DD",
 // NULL = unplanned/backlog) — a date, not a UTC timestamp.
+// `project_id` is an optional grouping (NULL = no project).
 const TASKS_SCHEMA = `
   CREATE TABLE IF NOT EXISTS tasks (
     id               INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -23,6 +36,7 @@ const TASKS_SCHEMA = `
     recurrence       TEXT    NOT NULL DEFAULT 'none' CHECK (recurrence IN ('none','daily','weekly')),
     duration_minutes INTEGER NOT NULL DEFAULT 90,
     planned_for      TEXT,
+    project_id       INTEGER REFERENCES projects(id) ON DELETE SET NULL,
     archived         INTEGER NOT NULL DEFAULT 0,
     created_at       TEXT    NOT NULL,
     updated_at       TEXT    NOT NULL
@@ -77,4 +91,8 @@ const taskCols = db
 
 if (!taskCols.some((c) => c.name === "planned_for")) {
   db.exec("ALTER TABLE tasks ADD COLUMN planned_for TEXT;");
+}
+
+if (!taskCols.some((c) => c.name === "project_id")) {
+  db.exec("ALTER TABLE tasks ADD COLUMN project_id INTEGER REFERENCES projects(id) ON DELETE SET NULL;");
 }
