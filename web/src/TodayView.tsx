@@ -3,6 +3,7 @@ import { api, parseUTC, type Active, type Task } from "./api";
 import { formatClock, formatDuration, formatMinutes, localDayKey } from "./format";
 import { useTracking } from "./tracking";
 import { NotePanel, NotePreview, NoteToggle } from "./Notes";
+import EditableDuration from "./EditableDuration";
 
 // A day plan is the set of tasks whose `planned_for` equals the day key, plus
 // recurring tasks that auto-appear (daily → every day, weekly → the weekday the
@@ -261,7 +262,14 @@ export default function TodayView() {
                       {t.recurrence === "weekly" ? "weekly" : "daily"}
                     </span>
                   )}
-                  <span>plan {formatMinutes(t.duration_minutes)}</span>
+                  <span className="flex items-center gap-1">
+                    <span>plan</span>
+                    <EditableDuration
+                      task={t}
+                      onSaved={refresh}
+                      onError={setError}
+                    />
+                  </span>
                   <NoteToggle
                     task={t}
                     open={notesOpen === t.id}
