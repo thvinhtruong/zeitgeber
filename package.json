@@ -8,6 +8,10 @@
     "web": "bun run --cwd web dev",
     "dev": "bun run web & bun run server",
     "build": "bun install --cwd web && bun run --cwd web build",
-    "start": "bun run server/index.ts"
+    "start": "bun run server/index.ts",
+    "menubar:build": "mkdir -p .build && swiftc -framework Cocoa macos/ZeitgeberMenuBar.swift -o .build/zeitgeber-menubar",
+    "menubar": "bun run menubar:build && .build/zeitgeber-menubar",
+    "menubar:install": "zsh macos/install-background.sh",
+    "menubar:uninstall": "zsh macos/uninstall-background.sh"
   }
 }

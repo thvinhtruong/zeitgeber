@@ -35,6 +35,22 @@ Core nouns:
 
 No test framework, no linter, no migration tool, no CI.
 
+### macOS menu-bar companion
+
+The optional `macos/ZeitgeberMenuBar.swift` companion creates an `NSStatusItem` that displays the
+active task's live elapsed time. It polls `GET /api/tasks` on `vinhtruong.localhost` every five seconds,
+then advances the clock locally each second from the returned UTC `started_at`; the web app and
+SQLite database remain the source of truth. The badge shows only the elapsed clock with a bold
+border; clicking it lists today's open planned and recurring tasks, with the active task checked,
+and starts the selected task immediately. Build and run it with `bun run menubar` while Docker is
+running. The menu also includes a stop action and opens `http://vinhtruong.localhost`; when no
+timer is active it shows `--:--:--`. To run the companion automatically at login and keep it alive, use
+`bun run menubar:install`. This installs a per-user `LaunchAgent` at
+`~/Library/LaunchAgents/com.zeitgeber.menubar.plist`; remove it with `bun run menubar:uninstall`.
+
+Docker publishes nginx on host port 80. The app server's port 3001 is container-internal and is
+not published to the host; nginx proxies `vinhtruong.localhost` to it over the Docker network.
+
 ## Boundaries & how they talk
 
 ```
@@ -133,7 +149,8 @@ macOS and Chrome already resolve any `*.localhost` name to loopback (RFC 6761), 
 127.0.0.1 vinhtruong.localhost
 ```
 
-Port 3001 stays published, so `http://localhost:3001` keeps working alongside the vanity URL.
+The app container's port 3001 is not published to the host; `http://vinhtruong.localhost` is the
+host-facing URL through nginx.
 
 The catch-all exists because a lone `server` block is implicitly the default and would answer to **any** Host header — including retired names. Reaching the app under a new hostname now requires adding it to `server_name`, so old names stop working the moment they leave that list.
 

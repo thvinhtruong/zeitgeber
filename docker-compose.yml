@@ -2,8 +2,6 @@ services:
   activity-detector:
     build: .
     container_name: activity-detector
-    ports:
-      - "3001:3001"
     volumes:
       - ./data:/data
     restart: unless-stopped
