@@ -41,6 +41,9 @@ reminds you every 5 minutes if no timer is running.
 - **Reports** — a Today breakdown (hero total, recurring-vs-one-off split) plus
   an on-demand range (week / month / 3 months / 6 months / year) with a
   bucketed bar chart and per-task time breakdown, timestamped down to the entry.
+- **macOS menu-bar badge** — an optional native badge shows the live timer with a
+  bold border. Click it to switch among today's planned and recurring tasks or
+  stop the timer without opening the web app.
 
 ## Run with Docker (recommended)
 
@@ -48,8 +51,28 @@ reminds you every 5 minutes if no timer is running.
 docker compose up --build -d
 ```
 
-Open http://localhost:3001 . Your database lives in `./data/app.db` on the host
-(mounted volume), so it survives container rebuilds.
+Open http://vinhtruong.localhost . nginx owns host port 80 and proxies to the
+app container's internal port 3001. Your database lives in `./data/app.db` on
+the host (mounted volume), so it survives container rebuilds.
+
+### macOS menu-bar background app
+
+With Docker running, install the menu-bar badge as a per-user background app:
+
+```bash
+bun run menubar:install
+```
+
+It starts at login and stays available in the macOS menu bar. Click the badge to
+choose today's tasks, start or switch timers, or stop the current timer. Use the
+badge's **Turn off menu bar** action to disable it; turn it on again with
+`bun run menubar:install`.
+
+Remove the background LaunchAgent with:
+
+```bash
+bun run menubar:uninstall
+```
 
 ## Run locally (dev, with hot reload)
 
