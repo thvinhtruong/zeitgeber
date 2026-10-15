@@ -146,7 +146,7 @@ final class MenuBarController: NSObject, NSApplicationDelegate {
         let open = NSMenuItem(title: "Open Zeitgeber", action: #selector(openTracker), keyEquivalent: "o")
         open.target = self
         menu.addItem(open)
-        let quit = NSMenuItem(title: "Quit menu bar", action: #selector(quit), keyEquivalent: "q")
+        let quit = NSMenuItem(title: "Turn off menu bar", action: #selector(quit), keyEquivalent: "q")
         quit.target = self
         menu.addItem(quit)
     }
@@ -210,6 +210,13 @@ final class MenuBarController: NSObject, NSApplicationDelegate {
     }
 
     @objc private func quit() {
+        let agentPath = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/LaunchAgents/com.zeitgeber.menubar.plist")
+            .path
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/launchctl")
+        process.arguments = ["bootout", "gui/\(getuid())", agentPath]
+        try? process.run()
         NSApp.terminate(nil)
     }
 }

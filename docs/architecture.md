@@ -47,6 +47,8 @@ running. The menu also includes a stop action and opens `http://vinhtruong.local
 timer is active it shows `--:--:--`. To run the companion automatically at login and keep it alive, use
 `bun run menubar:install`. This installs a per-user `LaunchAgent` at
 `~/Library/LaunchAgents/com.zeitgeber.menubar.plist`; remove it with `bun run menubar:uninstall`.
+The menu's `Turn off menu bar` action unloads that agent so it stays off; run
+`bun run menubar:install` to turn it on again.
 
 Docker publishes nginx on host port 80. The app server's port 3001 is container-internal and is
 not published to the host; nginx proxies `vinhtruong.localhost` to it over the Docker network.
