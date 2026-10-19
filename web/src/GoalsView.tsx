@@ -300,7 +300,7 @@ function GoalRow({
           className="cursor-pointer"
         />
         <button onClick={onToggle} className="min-w-0 flex-1 cursor-pointer text-left">
-          <span className={`block truncate text-sm ${closed ? "text-slate-400 line-through" : ""}`}>{g.title}</span>
+          <span className={`block whitespace-normal wrap-break-word text-sm ${closed ? "text-slate-400 line-through" : ""}`}>{g.title}</span>
           <span className="flex gap-2 text-xs text-slate-400">
             {g.status === "dropped" && <span>dropped</span>}
             {g.target_date && (
