@@ -23,6 +23,32 @@ export interface Project {
   created_at: string;
 }
 
+export type GoalCategory = "health" | "job" | "study";
+export type GoalStatus = "active" | "achieved" | "dropped";
+export const SMART_LETTERS = ["specific", "measurable", "achievable", "relevant", "time_bound"] as const;
+export type SmartLetter = (typeof SMART_LETTERS)[number];
+
+export interface SmartAssessment {
+  criteria: Record<SmartLetter, { score: number; feedback: string }>; // score 1-5
+  overall: number; // 0-100
+  summary: string;
+  suggestion: string;
+}
+
+export interface Goal {
+  id: number;
+  title: string;
+  details: string;
+  category: GoalCategory;
+  status: GoalStatus;
+  target_date: string | null; // local day key "YYYY-MM-DD"
+  assessment: SmartAssessment | null;
+  smart_score: number | null;
+  assessed_at: string | null; // UTC
+  created_at: string;
+  updated_at: string;
+}
+
 export interface Active {
   task_id: number;
   started_at: string;
@@ -107,6 +133,16 @@ export const api = {
   updateEntry: (id: number, patch: { started_at?: string; ended_at?: string | null }) =>
     req<TimeEntry>(`/api/entries/${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
   removeEntry: (id: number) => req(`/api/entries/${id}`, { method: "DELETE" }),
+  goals: () => req<{ goals: Goal[] }>("/api/goals"),
+  createGoal: (goal: Pick<Goal, "title" | "details" | "category" | "target_date">) =>
+    req<Goal>("/api/goals", { method: "POST", body: JSON.stringify(goal) }),
+  updateGoal: (
+    id: number,
+    patch: Partial<Pick<Goal, "title" | "details" | "category" | "status" | "target_date">>,
+  ) => req<Goal>(`/api/goals/${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
+  removeGoal: (id: number) => req(`/api/goals/${id}`, { method: "DELETE" }),
+  assessGoal: (id: number, today: string) =>
+    req<Goal>(`/api/goals/${id}/assess`, { method: "POST", body: JSON.stringify({ today }) }),
 };
 
 // Format a UTC SQLite timestamp for a <input type="datetime-local"> (local time).

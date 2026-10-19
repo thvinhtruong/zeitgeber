@@ -10,6 +10,12 @@
 
 Skip entries for bug fixes, doc-only changes, style tweaks, and dependency bumps. (This LITE setup has no separate ADR files; if rationale grows long, link out from the bullet.)
 
+## 2026-10-18 — S.M.A.R.T goals + AI assessment
+
+- **Decision** — Added a `goals` table + Goals tab (categories `health | job | study`), independent of tasks/timers, with an on-create Claude review (`server/smart.ts`, `@anthropic-ai/sdk`) that scores each S.M.A.R.T letter 1–5 and suggests a rewrite; the result is stored on the goal as JSON.
+- **Why** — Goals need a S.M.A.R.T check at writing time; doing it server-side keeps the API key out of the browser, and storing the review means the list never re-calls the model.
+- **Implications** — First outbound network dependency and first root npm dependency (Dockerfile now runs `bun install --production`). AI is optional: no `ANTHROPIC_API_KEY` → assess returns a clear error, the rest works. Categories are a CHECK constraint, so adding one needs the table-rebuild migration pattern.
+
 ## 2026-09-19 — Locked-in mode (focus mode → full-screen takeover)
 
 - **Decision** — Renamed focus mode to **locked-in mode** (`useFocusMode.ts` → `useLockedIn.ts`, `ad-focus` → `ad-locked-in`) and gave it a full-screen takeover: while on, `AppBody` renders `LockedInView` in place of the entire tab shell (no header, no nav) instead of just a header chip. It shows a live clock + Stop while tracking, or a minimal task picker when not — "not tracking" is a real state now, not just a gap before a reminder. Exit is a single always-visible corner button with **no confirmation**, same instant stop-and-return as before. The reminder engine (5-min cadence, OS notification, `document.title`) is unchanged.

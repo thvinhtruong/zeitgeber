@@ -13,5 +13,8 @@
     "menubar": "bun run menubar:build && .build/zeitgeber-menubar",
     "menubar:install": "zsh macos/install-background.sh",
     "menubar:uninstall": "zsh macos/uninstall-background.sh"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.135.0"
   }
 }

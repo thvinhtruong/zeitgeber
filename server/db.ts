@@ -57,6 +57,26 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_entries_started ON time_entries(started_at);
 `);
 
+// A goal is independent of tasks/timers. `target_date` is a LOCAL day key like
+// tasks.planned_for. `assessment` is the AI's S.M.A.R.T review as JSON text
+// (NULL = not assessed yet); `smart_score` (0-100) is copied out of it so the
+// list can sort/colour without parsing.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS goals (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    title       TEXT    NOT NULL,
+    details     TEXT    NOT NULL DEFAULT '',
+    category    TEXT    NOT NULL DEFAULT 'job' CHECK (category IN ('health','job','study')),
+    status      TEXT    NOT NULL DEFAULT 'active' CHECK (status IN ('active','achieved','dropped')),
+    target_date TEXT,
+    assessment  TEXT,
+    smart_score INTEGER,
+    assessed_at TEXT,
+    created_at  TEXT    NOT NULL,
+    updated_at  TEXT    NOT NULL
+  );
+`);
+
 // ---- migration for pre-existing DBs ----
 // Older DBs have a tasks table without `recurrence` / `duration_minutes` and a
 // status CHECK that forbids 'recurring'. SQLite can't ALTER a CHECK constraint,

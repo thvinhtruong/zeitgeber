@@ -9,8 +9,9 @@ RUN cd web && bun run build
 # ---------- runtime ----------
 FROM oven/bun:1.3 AS runtime
 WORKDIR /app
+COPY package.json bun.lock* ./
+RUN bun install --production
 COPY server server
-COPY package.json .
 COPY --from=build /app/web/dist web/dist
 
 ENV PORT=3001

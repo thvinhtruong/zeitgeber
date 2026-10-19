@@ -21,6 +21,7 @@ Core nouns:
 - **TimeEntry** — a row in `time_entries` with `started_at` and a nullable `ended_at`. An entry with `ended_at IS NULL` is the **active timer**.
 - **Active timer** — there is at most **one** open `time_entry` across the whole DB at any moment.
 - **Duration** — never stored; computed in SQL as `julianday(ended_at) - julianday(started_at)` (×86400 for seconds).
+- **Goal** — a longer-horizon S.M.A.R.T objective, **independent of tasks and timers**: `title`, optional `details`, a `category` ∈ `health | job | study`, a `status` ∈ `active | achieved | dropped`, and a nullable `target_date` (local day key, like `planned_for`). Each goal can carry an **AI assessment** — Claude scores the five S.M.A.R.T letters 1–5 with one line of feedback each, plus a summary and a rewritten suggestion; `overall` (0–100) is derived from the five scores (`(sum − 5) / 20`), not asked of the model.
 - **Report** — durations aggregated over a requested date range, clipping entries to the range and treating a still-running entry's end as "now".
 
 ## Stack overview
@@ -63,9 +64,10 @@ web/src (React, :5173 dev)  --HTTP /api/*-->  server/index.ts (Bun.serve, :3001)
 - **Prod:** one Bun process serves `web/dist` static files AND `/api/*` on `:3001`.
 - The only contract between frontend and backend is the JSON REST API under `/api/*`; shared TypeScript types live in `web/src/api.ts` (`Task`, `Active`, `ReportEntry`).
 
-## Backend — `server/` (two files)
+## Backend — `server/` (three files)
 
 - **`db.ts`** — opens/creates the SQLite DB, sets WAL + foreign keys, runs the `CREATE TABLE IF NOT EXISTS` schema **inline**. This *is* the migration system; there are no migration files — edit the schema here. Changing columns on an existing `data/app.db` requires manual migration.
+- **`smart.ts`** — the only outbound call: `assessGoal()` asks Claude (`@anthropic-ai/sdk`, `claude-opus-5-5`, effort `medium`, server-side `fallbacks: "default"`) for a S.M.A.R.T review constrained by a JSON schema (`output_config.format`), then clamps scores to 1–5 and computes `overall`. The client is created lazily, so the server boots and everything except `/assess` works without a key. `describeAIError` maps auth/rate-limit/API errors to a readable message.
 - **`index.ts`** — a single `Bun.serve` handler. `/api/*` routes through `handleApi` (path matching on `pathname` segments, **no framework/router**); everything else falls through to `serveStatic`, which serves `web/dist` and falls back to `index.html` for SPA routing.
 
 ### Timer logic (must preserve)
@@ -77,7 +79,7 @@ web/src (React, :5173 dev)  --HTTP /api/*-->  server/index.ts (Bun.serve, :3001)
 ## Frontend — `web/src/`
 
 - `App.tsx` — thin: wraps `AppBody` in `TrackingProvider` and nothing else.
-- `AppBody.tsx` — owns the tab shell (`TodayView` default, `TasksView`, `ReportsView`) **and** the two session-flag hooks (`useLockedIn`, `useIdleAutoStop`). It renders either the normal header+nav+main shell (passing the hook state down to `TrackingStatus` as props) or, while locked-in mode is on, `LockedInView` full-screen in its place. The hooks are mounted here — one level above the shell swap — specifically so the reminder clock, `document.title`, and the idle watcher keep running no matter which shell is showing; mounting them inside the swapped-out component would silently kill them on entering locked-in mode.
+- `AppBody.tsx` — owns the tab shell (`TodayView` default, `TasksView`, `GoalsView`, `ReportsView`) **and** the two session-flag hooks (`useLockedIn`, `useIdleAutoStop`). It renders either the normal header+nav+main shell (passing the hook state down to `TrackingStatus` as props) or, while locked-in mode is on, `LockedInView` full-screen in its place. The hooks are mounted here — one level above the shell swap — specifically so the reminder clock, `document.title`, and the idle watcher keep running no matter which shell is showing; mounting them inside the swapped-out component would silently kill them on entering locked-in mode.
 - `tracking.tsx` — `TrackingProvider` / `useTracking`: the app-wide view of `{ tasks, active }` that the header pill needs on every tab. Views `publish()` what they just fetched (instant) and the provider also polls `/api/tasks` every 20s as a fallback for tabs that don't fetch (Reports). `version` is the reverse channel — `invalidate()` bumps it to ask every view to re-read, which is how an idle auto-stop triggered from the header reaches the views.
 - `TrackingStatus.tsx` — purely presentational: the two session flags as identical always-visible switch chips (`FlagChip`) in the header, taking `lockedIn`/`idle`/`error` as props from `AppBody` rather than mounting the hooks itself. There is no status badge/popover, because the running task's title, live clock and stop button already live on its row in `TodayView` and a header copy only competed with them. A flag's `notice` (permission denied, auto-stopped, or a failed stop) rides its chip as an amber ring + `title` tooltip; a `sr-only` live region announces an overdue reminder.
 - `useLockedIn.ts` / `useIdleAutoStop.ts` — the two session flags; see below.
@@ -88,6 +90,7 @@ web/src (React, :5173 dev)  --HTTP /api/*-->  server/index.ts (Bun.serve, :3001)
   - **Range** (`Week | Month | 3 months | 6 months | Year`, on demand) — a stacked bar chart bucketed automatically from the range (day → week → month; every bucket in the range gets a column, empty ones included, so a week off doesn't stretch the time axis), plus per-task totals as **horizontal rows** (bar under the title) split into `One-off tasks` / `Recurring tasks` groups, capped at `TOP_N` with a "show more" expander. Row bars share one scale (the largest task in the report) so lengths stay comparable across the two groups.
   - Recurring vs one-off comes from the entry's **`recurrence`**, not its `status` — a recurring task ticked off for the day has `status = 'done'`. Its two colours are categorical slots 1 (blue `#2a78d6`) and 2 (orange `#eb6834`); they follow the kind of task, never its rank.
 - `TasksView.tsx` — the full list; its **Plan** column shows `every day/week` for recurring tasks, a `+ Today` button when unplanned, or a date input + ✕ to move/clear `planned_for`. Its **Project** column is a `<select>` chip (colored by the project when set, muted "No project" when not) next to Plan; a collapsible "Manage projects" panel above the table does inline create (name + preset color swatch) / rename / delete — no separate settings page. Planned durations use the shared `EditableDuration` control in both Tasks and Today views. Not having a project is the unremarkable default, same as an unplanned task.
+- `GoalsView.tsx` — the Goals tab: a create form (title, category, target date, optional details), an `All | Health | Job | Study` filter, and the list grouped by category, active first (achieved/dropped behind a toggle). Creating a goal saves it immediately and **then** fires `/assess`, so the row appears at once with an "Assessing…" pill that becomes a colour-coded `SMART <score>` pill (≥80 green, ≥50 amber, else red). Expanding a row shows the per-letter dots + feedback, the summary, a "Use this" button that adopts the AI's rewrite without starting another assessment, an inline editor (saving re-assesses), Re-assess, Drop/Reactivate and Delete. Changing assessment inputs clears the stored assessment; the user can choose when to assess the updated goal.
 - `api.ts` — typed fetch wrapper **and** the source of shared types. Add new API calls + types here.
 - `format.ts` — time/date display helpers.
 - Tailwind v4 has **no config file**; use utility classes inline. Charts via Recharts.
@@ -117,6 +120,7 @@ They are two halves of "keep my tracking honest" and are designed together: auto
   - **Migration note:** `planned_for` and `project_id` are nullable with no CHECK, so `db.ts` adds them to old DBs with a plain `ALTER TABLE … ADD COLUMN` guarded by a `PRAGMA table_info(tasks)` check.
   - **Migration note:** because SQLite can't ALTER a CHECK constraint, `db.ts` detects a pre-`recurring` tasks table (by scanning its stored DDL) and rebuilds it (rename → recreate → copy → drop) under `legacy_alter_table=ON` + `foreign_keys=OFF` so `time_entries`' FK text keeps pointing at `tasks`. This runs once per old DB; fresh DBs skip it.
 - `projects` — `id`, `name`, `color` (hex string, default `#6366f1`), `created_at`. No CHECK, no status — a flat label table. `server/index.ts` exposes `GET/POST /api/projects` and `PATCH/DELETE /api/projects/:id`; the task list does **not** join project data server-side (`GET /api/tasks` ships bare `project_id`), the client joins against a separately-fetched `GET /api/projects` — keeps the hot task-list query un-joined.
+- `goals` — `id`, `title`, `details`, `category` (`health|job|study`, CHECK), `status` (`active|achieved|dropped`, CHECK), `target_date` (nullable local day key, validated by `isDayKey`), `assessment` (nullable JSON text of the AI review — the API ships it parsed), `smart_score` (nullable INTEGER 0–100, copied out of the assessment), `assessed_at` (UTC), `created_at`, `updated_at`. No FKs; unrelated to tasks. Routes: `GET/POST /api/goals`, `PATCH/DELETE /api/goals/:id`, `POST /api/goals/:id/assess` (body `{ today }`, the client's local day key so "time-bound" is judged against the user's date; 502 with a readable `error` on AI failure). Creating never waits on the AI.
 - `time_entries` — `id`, `task_id` (FK), `started_at`, `ended_at` (nullable; NULL = active).
 - All timestamps are stored as **UTC text** (see below). `total_seconds` and report figures are computed, not columns.
 
@@ -131,6 +135,7 @@ All timestamps are stored as **UTC** in the SQLite text format `"YYYY-MM-DD HH:M
 | `PORT` | `3001` | HTTP port |
 | `DATA_DIR` | `data` | Directory holding `app.db` (Docker uses `/data`, a mounted volume) |
 | `STATIC_ROOT` | `web/dist` | Built frontend to serve |
+| `ANTHROPIC_API_KEY` | — | Optional. Enables the AI S.M.A.R.T review on goals; without it `/api/goals/:id/assess` returns an "AI is not configured" error and everything else works. `docker-compose.yml` passes it through from the host shell or a git-ignored `.env`. |
 
 ## Deploy
 

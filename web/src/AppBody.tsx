@@ -2,6 +2,7 @@ import { useCallback, useMemo, useState } from "react";
 import TasksView from "./TasksView";
 import TodayView from "./TodayView";
 import ReportsView from "./ReportsView";
+import GoalsView from "./GoalsView";
 import TrackingStatus from "./TrackingStatus";
 import LockedInView from "./LockedInView";
 import { api } from "./api";
@@ -9,7 +10,7 @@ import { useTracking } from "./tracking";
 import { useLockedIn } from "./useLockedIn";
 import { useIdleAutoStop } from "./useIdleAutoStop";
 
-type Tab = "today" | "tasks" | "reports";
+type Tab = "today" | "tasks" | "goals" | "reports";
 
 // Owns the two session-flag hooks (see useLockedIn / useIdleAutoStop) so they
 // keep running regardless of which shell is on screen: the normal tab shell,
@@ -76,7 +77,7 @@ export default function AppBody() {
           <div className="ml-auto flex flex-wrap items-center justify-end gap-3">
             <TrackingStatus lockedIn={lockedIn} idle={idle} error={error} />
             <nav className="flex gap-1 rounded-lg bg-slate-100 p-1 dark:bg-slate-800">
-              {(["today", "tasks", "reports"] as Tab[]).map((t) => (
+              {(["today", "tasks", "goals", "reports"] as Tab[]).map((t) => (
                 <button
                   key={t}
                   onClick={() => setTab(t)}
@@ -95,7 +96,15 @@ export default function AppBody() {
       </header>
 
       <main className="mx-auto max-w-5xl px-5 py-6">
-        {tab === "today" ? <TodayView /> : tab === "tasks" ? <TasksView /> : <ReportsView />}
+        {tab === "today" ? (
+          <TodayView />
+        ) : tab === "tasks" ? (
+          <TasksView />
+        ) : tab === "goals" ? (
+          <GoalsView />
+        ) : (
+          <ReportsView />
+        )}
       </main>
     </div>
   );

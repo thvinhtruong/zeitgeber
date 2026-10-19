@@ -4,6 +4,9 @@ services:
     container_name: activity-detector
     volumes:
       - ./data:/data
+    # optional: enables the AI S.M.A.R.T review on goals (read from your shell or .env)
+    env_file:
+      - .env
     restart: unless-stopped
 
   nginx:

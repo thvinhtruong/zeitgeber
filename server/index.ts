@@ -1,4 +1,5 @@
 import { db } from "./db";
+import { assessGoal, describeAIError } from "./smart";
 
 const PORT = Number(process.env.PORT ?? 3000);
 const STATIC_ROOT = process.env.STATIC_ROOT ?? "web/dist";
@@ -20,6 +21,22 @@ const RECURRENCES = ["none", "daily", "weekly"];
 // A local calendar day key, "YYYY-MM-DD" (used by tasks.planned_for).
 const isDayKey = (v: unknown): v is string =>
   typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v);
+
+const GOAL_CATEGORIES = ["health", "job", "study"];
+const GOAL_STATUSES = ["active", "achieved", "dropped"];
+
+const listGoals = db.query(`
+  SELECT * FROM goals
+  ORDER BY CASE status WHEN 'active' THEN 0 WHEN 'achieved' THEN 1 ELSE 2 END,
+           target_date IS NULL, target_date, created_at DESC
+`);
+const getGoal = db.query(`SELECT * FROM goals WHERE id = ?`);
+
+// goals.assessment is stored as JSON text; ship it parsed
+const goalRow = (row: any) => ({
+  ...row,
+  assessment: row.assessment ? JSON.parse(row.assessment) : null,
+});
 
 const listProjects = db.query(`SELECT * FROM projects ORDER BY name`);
 const getProject = db.query(`SELECT id FROM projects WHERE id = ?`);
@@ -277,6 +294,109 @@ function handleApi(req: Request, url: URL): Response {
     if (method === "DELETE") {
       db.query(`DELETE FROM projects WHERE id = ?`).run(pid);
       return json({ ok: true });
+    }
+  }
+
+  // GET /api/goals
+  if (pathname === "/api/goals" && method === "GET") {
+    return json({ goals: (listGoals.all() as any[]).map(goalRow) });
+  }
+
+  // POST /api/goals  (assessment is a separate call so creating never waits on the AI)
+  if (pathname === "/api/goals" && method === "POST") {
+    return req.json().then((body: any) => {
+      const title = String(body?.title ?? "").trim();
+      if (!title) return bad("title is required");
+      const category = GOAL_CATEGORIES.includes(body?.category) ? body.category : "job";
+      const target_date = isDayKey(body?.target_date) ? body.target_date : null;
+      const now = nowSQL();
+      const row = db
+        .query(
+          `INSERT INTO goals (title, details, category, target_date, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?) RETURNING *`,
+        )
+        .get(title, String(body?.details ?? ""), category, target_date, now, now);
+      return json(goalRow(row), 201);
+    }) as unknown as Response;
+  }
+
+  // /api/goals/:id ...
+  if (seg[0] === "api" && seg[1] === "goals" && seg[2]) {
+    const gid = Number(seg[2]);
+    if (!Number.isInteger(gid)) return bad("invalid id");
+    const goal = getGoal.get(gid) as any;
+    if (!goal) return bad("goal not found", 404);
+
+    // PATCH /api/goals/:id
+    if (!seg[3] && method === "PATCH") {
+      return req.json().then((body: any) => {
+        const fields: string[] = [];
+        const vals: any[] = [];
+        if (typeof body.title === "string") {
+          const title = body.title.trim();
+          if (!title) return bad("title cannot be empty");
+          fields.push("title = ?");
+          vals.push(title);
+        }
+        if (typeof body.details === "string") {
+          fields.push("details = ?");
+          vals.push(body.details);
+        }
+        if (GOAL_CATEGORIES.includes(body.category)) {
+          fields.push("category = ?");
+          vals.push(body.category);
+        }
+        if (GOAL_STATUSES.includes(body.status)) {
+          fields.push("status = ?");
+          vals.push(body.status);
+        }
+        if (body.target_date === null || isDayKey(body.target_date)) {
+          fields.push("target_date = ?");
+          vals.push(body.target_date);
+        }
+        if (!fields.length) return bad("nothing to update");
+        if (fields.some((field) => /^(title|details|category|target_date) = \?$/.test(field))) {
+          fields.push("assessment = NULL", "smart_score = NULL", "assessed_at = NULL");
+        }
+        fields.push("updated_at = ?");
+        vals.push(nowSQL(), gid);
+        const row = db
+          .query(`UPDATE goals SET ${fields.join(", ")} WHERE id = ? RETURNING *`)
+          .get(...vals);
+        return json(goalRow(row));
+      }) as unknown as Response;
+    }
+
+    // DELETE /api/goals/:id
+    if (!seg[3] && method === "DELETE") {
+      db.query(`DELETE FROM goals WHERE id = ?`).run(gid);
+      return json({ ok: true });
+    }
+
+    // POST /api/goals/:id/assess  (body { today } = the client's local day key)
+    if (seg[3] === "assess" && !seg[4] && method === "POST") {
+      return req.text().then(async (txt) => {
+        let today = nowSQL().slice(0, 10);
+        try {
+          const v = txt ? JSON.parse(txt)?.today : undefined;
+          if (isDayKey(v)) today = v;
+        } catch {
+          /* empty / invalid body -> UTC today */
+        }
+        let assessment;
+        try {
+          assessment = await assessGoal({ ...goal, today });
+        } catch (err) {
+          console.error(err);
+          return bad(describeAIError(err), 502);
+        }
+        const row = db
+          .query(
+            `UPDATE goals SET assessment = ?, smart_score = ?, assessed_at = ? WHERE id = ? RETURNING *`,
+          )
+          .get(JSON.stringify(assessment), assessment.overall, nowSQL(), gid);
+        return json(goalRow(row));
+      }) as unknown as Response;
     }
   }
 
