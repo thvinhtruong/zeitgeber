@@ -10,6 +10,12 @@
 
 Skip entries for bug fixes, doc-only changes, style tweaks, and dependency bumps. (This LITE setup has no separate ADR files; if rationale grows long, link out from the bullet.)
 
+## 2026-11-05 — Done board + `completed_at`
+
+- **Decision** — Added a nullable UTC `tasks.completed_at` and a shared `DoneBoard` (done-task blocks, stat tiles, 14-day done-per-day chart) on Today and Tasks.
+- **Why** — "What did I finish on day X" needs a real completion timestamp; `updated_at` moves on any edit. Computing per-day counts client-side from the task list avoids a new endpoint.
+- **Implications** — Backfilled done tasks use `updated_at` as an approximation. Un-done → NULL, so a re-completed task counts on its new day. Archived tasks drop out of the metrics (list query excludes them).
+
 ## 2026-10-18 — S.M.A.R.T goals + AI assessment
 
 - **Decision** — Added a `goals` table + Goals tab (categories `health | job | study`), independent of tasks/timers, with an on-create Claude review (`server/smart.ts`, `@anthropic-ai/sdk`) that scores each S.M.A.R.T letter 1–5 and suggests a rewrite; the result is stored on the goal as JSON.

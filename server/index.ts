@@ -117,8 +117,8 @@ function handleApi(req: Request, url: URL): Response {
       const now = nowSQL();
       const row = db
         .query(
-          `INSERT INTO tasks (title, description, status, recurrence, duration_minutes, planned_for, project_id, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+          `INSERT INTO tasks (title, description, status, recurrence, duration_minutes, planned_for, project_id, completed_at, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
         )
         .get(
           title,
@@ -128,6 +128,7 @@ function handleApi(req: Request, url: URL): Response {
           duration,
           planned_for,
           project_id,
+          status === "done" ? now : null,
           now,
           now,
         );
@@ -158,8 +159,15 @@ function handleApi(req: Request, url: URL): Response {
         if (STATUSES.includes(body.status)) {
           fields.push("status = ?");
           vals.push(body.status);
-          // stop tracking when a task is finished
-          if (body.status === "done") stopRunning.run(nowSQL());
+          // stop tracking when a task is finished; stamp when it was finished
+          // (COALESCE keeps the original stamp if it's re-patched as done)
+          if (body.status === "done") {
+            stopRunning.run(nowSQL());
+            fields.push("completed_at = COALESCE(completed_at, ?)");
+            vals.push(nowSQL());
+          } else {
+            fields.push("completed_at = NULL");
+          }
         }
         if (RECURRENCES.includes(body.recurrence)) {
           fields.push("recurrence = ?");

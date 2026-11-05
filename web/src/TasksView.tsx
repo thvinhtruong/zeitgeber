@@ -20,6 +20,7 @@ import {
 import { useTracking } from "./tracking";
 import { NotePanel, NotePreview, NoteToggle } from "./Notes";
 import EditableDuration from "./EditableDuration";
+import DoneBoard from "./DoneBoard";
 
 type Panel = "notes" | "entries";
 
@@ -153,6 +154,8 @@ export default function TasksView() {
           {error}
         </div>
       )}
+
+      <DoneBoard tasks={tasks} day={localDayKey(new Date())} title="Done today" />
 
       <div className="overflow-hidden rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
         <table className="w-full text-sm">

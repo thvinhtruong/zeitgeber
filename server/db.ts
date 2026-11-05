@@ -27,6 +27,7 @@ db.exec(`
 // `planned_for` is the LOCAL calendar day the task is planned for ("YYYY-MM-DD",
 // NULL = unplanned/backlog) — a date, not a UTC timestamp.
 // `project_id` is an optional grouping (NULL = no project).
+// `completed_at` is the UTC time the task last became 'done' (NULL otherwise).
 const TASKS_SCHEMA = `
   CREATE TABLE IF NOT EXISTS tasks (
     id               INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -36,6 +37,7 @@ const TASKS_SCHEMA = `
     recurrence       TEXT    NOT NULL DEFAULT 'none' CHECK (recurrence IN ('none','daily','weekly')),
     duration_minutes INTEGER NOT NULL DEFAULT 90,
     planned_for      TEXT,
+    completed_at     TEXT,
     project_id       INTEGER REFERENCES projects(id) ON DELETE SET NULL,
     archived         INTEGER NOT NULL DEFAULT 0,
     created_at       TEXT    NOT NULL,
@@ -115,4 +117,11 @@ if (!taskCols.some((c) => c.name === "planned_for")) {
 
 if (!taskCols.some((c) => c.name === "project_id")) {
   db.exec("ALTER TABLE tasks ADD COLUMN project_id INTEGER REFERENCES projects(id) ON DELETE SET NULL;");
+}
+
+// `completed_at` (UTC) — nullable, so plain ADD COLUMN; backfill tasks that were
+// already done with their last update time, the best record we have.
+if (!taskCols.some((c) => c.name === "completed_at")) {
+  db.exec("ALTER TABLE tasks ADD COLUMN completed_at TEXT;");
+  db.exec("UPDATE tasks SET completed_at = updated_at WHERE status = 'done';");
 }

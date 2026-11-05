@@ -10,6 +10,7 @@ export interface Task {
   duration_minutes: number;
   planned_for: string | null; // local day key "YYYY-MM-DD"; null = backlog
   project_id: number | null;
+  completed_at: string | null; // UTC; set when status became 'done'
   archived: number;
   created_at: string;
   updated_at: string;

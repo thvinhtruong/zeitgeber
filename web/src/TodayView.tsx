@@ -4,6 +4,7 @@ import { formatClock, formatDuration, formatMinutes, localDayKey } from "./forma
 import { useTracking } from "./tracking";
 import { NotePanel, NotePreview, NoteToggle } from "./Notes";
 import EditableDuration from "./EditableDuration";
+import DoneBoard from "./DoneBoard";
 
 // A day plan is the set of tasks whose `planned_for` equals the day key, plus
 // recurring tasks that auto-appear (daily → every day, weekly → the weekday the
@@ -337,6 +338,15 @@ export default function TodayView() {
           </li>
         )}
       </ul>
+
+      {/* ---- what got done, with metrics ---- */}
+      <DoneBoard
+        tasks={tasks}
+        day={day}
+        planned={planned}
+        title={`Done ${relative?.toLowerCase() ?? `on ${dayLabel}`}`}
+        onSelectDay={setDay}
+      />
 
       {/* ---- backlog picker ---- */}
       {backlog.length > 0 && (
